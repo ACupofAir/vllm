@@ -97,6 +97,72 @@ class IpexAttnMetadata(AttentionMetadata, PagedAttentionMetadata):
 
 from torch.nn.functional import scaled_dot_product_attention
 
+def _ipex_llm_restore_fp8(k_cache, v_cache, dtype):
+    print(k_cache.shape)
+    flattened = False
+    if len(k_cache.shape) == 5:
+        original_shape = k_cache.shape
+        cur_k_cache = k_cache
+        cur_k_cache = k_cache.permute(0, 1, 2, 4, 3)
+        A, B, C, E, D = cur_k_cache.shape
+        cur_k_cache = cur_k_cache.reshape(A, B, C * E, D)
+        flattened = True
+    else:
+        cur_k_cache = k_cache
+    
+    cur_k_cache = cur_k_cache.permute(0,1,3,2)
+    cur_v_cache = v_cache.permute(0,1,3,2)
+    key_states = torch.empty(cur_k_cache.shape, device=k_cache.device, dtype=dtype)
+    value_states = torch.empty(cur_v_cache.shape, device=v_cache.device, dtype=dtype)
+
+    import xe_addons
+    print(cur_k_cache.shape)
+    xe_addons.dequantize_key_value(cur_k_cache, cur_v_cache, key_states, value_states)
+
+    key_states = key_states.permute(0,1,3,2)
+    value_states = value_states.permute(0,1,3,2)
+
+    if flattened:
+        # key_states = key_states.view(original_shape)
+        key_states = key_states.reshape(A, B, C, E, D)
+        key_states = key_states.permute(0, 1, 2, 4, 3)
+    print(key_states.shape)
+    return key_states.contiguous(), value_states.contiguous()
+
+
+def _ipex_llm_convert_fp8(k_cache, v_cache):
+    print(k_cache.shape)
+    flattened = False
+    if len(k_cache.shape) == 5:
+        original_shape = k_cache.shape
+        # cur_k_cache = k_cache
+        cur_k_cache = k_cache.permute(0, 1, 2, 4, 3)
+        A, B, C, E, D = cur_k_cache.shape
+        cur_k_cache = cur_k_cache.reshape(A, B, C * E, D)
+        # cur_k_cache = k_cache.squeeze(-1)
+        flattened = True
+    else:
+        cur_k_cache = k_cache
+
+    cur_k_cache = cur_k_cache.permute(0,1,3,2)
+    cur_v_cache = v_cache.permute(0,1,3,2)
+    key_states = torch.empty(cur_k_cache.shape, device=k_cache.device, dtype=torch.uint8)
+    value_states = torch.empty(cur_v_cache.shape, device=v_cache.device, dtype=torch.uint8)
+
+    import xe_addons
+    print(cur_k_cache.shape)
+    xe_addons.quantize_key_value(cur_k_cache, cur_v_cache,
+                                 key_states, value_states)
+    key_states = key_states.permute(0,1,3,2)
+    value_states = value_states.permute(0,1,3,2)
+    if flattened:
+        # key_states = key_states.view(original_shape)
+        key_states = key_states.reshape(A, B, C, E, D)
+        key_states = key_states.permute(0, 1, 2, 4, 3)
+    
+    print(key_states.shape)
+    return key_states.contiguous(), value_states.contiguous()
+
 def _make_attention_mask(
     att_bias: List[torch.Tensor],
     seq_lens: List[int],
@@ -158,10 +224,10 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
             raise ValueError(
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {supported_head_sizes}.")
-        if kv_cache_dtype != "auto":
-            raise NotImplementedError(
-                "IPEX backend does not support FP8 KV cache. "
-                "Please use xFormers backend instead.")
+        # if kv_cache_dtype != "auto":
+        #     raise NotImplementedError(
+        #         "IPEX backend does not support FP8 KV cache. "
+        #         "Please use xFormers backend instead.")
 
     def split_kv_cache(
         self,
@@ -169,7 +235,27 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
         num_kv_heads: int,
         head_size: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # x = 1
+        x = 16 // kv_cache.element_size()
+        num_blocks = kv_cache.shape[1]
+
+        key_cache = kv_cache[0]
+        value_cache = kv_cache[1]
+
+        key_cache = key_cache.view(num_blocks, num_kv_heads, head_size // x,
+                                   -1, x)
+        value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
+
+        if key_cache.dtype == torch.uint8:
+            key_cache = key_cache.view(num_blocks, num_kv_heads, head_size // x,
+                                   -1, x)
+            value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
+            key_cache, value_cache = _ipex_llm_restore_fp8(key_cache, value_cache, torch.float16)
+
+        key_cache = key_cache.view(num_blocks, num_kv_heads, head_size // x,
+                                   -1, x)
+        value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
+        return key_cache, value_cache
+        # x = 16 // kv_cache.element_size()
         # num_blocks = kv_cache.shape[1]
 
         # key_cache = kv_cache[0]
@@ -178,15 +264,6 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
         # value_cache = kv_cache[1]
         # value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
         # return key_cache, value_cache
-        x = 16 // kv_cache.element_size()
-        num_blocks = kv_cache.shape[1]
-
-        key_cache = kv_cache[0]
-        key_cache = key_cache.view(num_blocks, num_kv_heads, head_size // x,
-                                   -1, x)
-        value_cache = kv_cache[1]
-        value_cache = value_cache.view(num_blocks, num_kv_heads, head_size, -1)
-        return key_cache, value_cache
 
     def forward(
         self,
@@ -221,7 +298,8 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-
+        key_cache = None
+        value_cache = None
         if kv_cache is not None:
             key_cache, value_cache = self.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -386,7 +464,9 @@ class IpexAttnBackendImpl(AttentionImpl[IpexAttnMetadata]):
                     v_scale,
                 )
 
-            # Reshape the output tensor.
+        # Reshape the output tensor.
+        if key_cache is not None:
+            key_cache, value_cache = _ipex_llm_convert_fp8(key_cache, value_cache)
         return output.view(-1, self.num_heads * self.head_size)
 
 

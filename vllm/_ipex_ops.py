@@ -79,7 +79,7 @@ class ipex_ops:
         blocksparse_block_size: int = 64,
         blocksparse_head_sliding_step: int = 0,
     ) -> None:
-        assert kv_cache_dtype == "auto"
+        # assert kv_cache_dtype == "auto"
         num_heads = out.size(1)
         num_queries_per_tokens = num_heads // num_kv_heads
         head_mapping = torch.arange(
@@ -122,7 +122,7 @@ class ipex_ops:
         blocksparse_block_size: int = 64,
         blocksparse_head_sliding_step: int = 0,
     ) -> None:
-        assert kv_cache_dtype == "auto"
+        # assert kv_cache_dtype == "auto"
         num_heads = out.size(1)
         num_queries_per_tokens = num_heads // num_kv_heads
         head_mapping = torch.arange(

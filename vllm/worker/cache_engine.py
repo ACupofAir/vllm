@@ -83,7 +83,8 @@ class CacheEngine:
             # We zero-out everything for simplicity.
             kv_cache.append(
                 torch.zeros(kv_cache_shape,
-                            dtype=self.dtype,
+                            # dtype=self.dtype,
+                            dtype=torch.uint8,
                             pin_memory=pin_memory,
                             device=device))
         return kv_cache

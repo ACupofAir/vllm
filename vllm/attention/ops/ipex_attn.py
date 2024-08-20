@@ -38,21 +38,21 @@ class PagedAttention:
         value_cache = value_cache.view(num_blocks, num_kv_heads, -1, head_size)
         return key_cache, value_cache
 
-    @staticmethod
-    def write_to_paged_cache(
-        key: torch.Tensor,
-        value: torch.Tensor,
-        key_cache: torch.Tensor,
-        value_cache: torch.Tensor,
-        slot_mapping: torch.Tensor,
-        kv_cache_dtype: str,
-        k_scale: float,
-        v_scale: float,
-        *args,
-    ) -> None:
-        ipex_modules.PagedAttention.reshape_and_cache(
-            key, value, key_cache, value_cache,
-            slot_mapping.flatten().int())
+    # @staticmethod
+    # def write_to_paged_cache(
+    #     key: torch.Tensor,
+    #     value: torch.Tensor,
+    #     key_cache: torch.Tensor,
+    #     value_cache: torch.Tensor,
+    #     slot_mapping: torch.Tensor,
+    #     kv_cache_dtype: str,
+    #     k_scale: float,
+    #     v_scale: float,
+    #     *args,
+    # ) -> None:
+    #     ipex_modules.PagedAttention.reshape_and_cache(
+    #         key, value, key_cache, value_cache,
+    #         slot_mapping.flatten().int())
 
     @staticmethod
     def forward_decode(
