@@ -391,20 +391,21 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPUWithSamplingMetadata]):
         self.model: nn.Module  # Set after init_Model
 
     def load_model(self) -> None:
-        with CudaMemoryProfiler() as m:
-            self.model = get_model(
-                model_config=self.model_config,
-                device_config=self.device_config,
-                load_config=self.load_config,
-                lora_config=self.lora_config,
-                parallel_config=self.parallel_config,
-                scheduler_config=self.scheduler_config,
-                cache_config=self.cache_config,
-            )
+        pass
+        # with CudaMemoryProfiler() as m:
+        #     self.model = get_model(
+        #         model_config=self.model_config,
+        #         device_config=self.device_config,
+        #         load_config=self.load_config,
+        #         lora_config=self.lora_config,
+        #         parallel_config=self.parallel_config,
+        #         scheduler_config=self.scheduler_config,
+        #         cache_config=self.cache_config,
+        #     )
 
-        self.model_memory_usage = m.consumed_memory
-        logger.info("Loading model weights took %.4f GB",
-                    self.model_memory_usage / float(2**30))
+        # self.model_memory_usage = m.consumed_memory
+        # logger.info("Loading model weights took %.4f GB",
+        #             self.model_memory_usage / float(2**30))
 
     @property
     def vocab_size(self) -> int:
@@ -540,7 +541,7 @@ class XPUModelRunner(ModelRunnerBase[ModelInputForXPUWithSamplingMetadata]):
                 and self.observability_config.collect_model_forward_time):
             model_forward_start_time = time.time()
 
-        hidden_states = model_executable(
+        hidden_or_intermediate_states = model_executable(
             input_ids=model_input.input_tokens,
             positions=model_input.input_positions,
             kv_caches=kv_caches,
